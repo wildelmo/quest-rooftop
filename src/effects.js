@@ -552,17 +552,17 @@ export function createEffects(ctx) {
     }
   });
 
-  // Auto score popups + confetti so every score lands with fanfare.
+  // Celebration popups + confetti. It's a sandbox, not a game: show the
+  // label ("SWISH!", "BOOMERANG!"), never numbers — points only rank how
+  // big the celebration gets.
   on('score', (p) => {
     if (!p) return;
     const pos = isV3(p.position) ? p.position : null;
     if (!pos) return;
     const points = num(p.points, 0);
     const combo = num(p.combo, 1);
-    let text = '';
-    if (typeof p.label === 'string' && p.label) text = p.label + ' ';
-    text += '+' + Math.round(points);
-    if (combo >= 2) text += '  x' + Math.round(combo);
+    const text = (typeof p.label === 'string' && p.label) ? p.label : '';
+    if (!text) return;
     const big = points >= SLOWMO_THRESHOLD;
     const color = big ? 0xffb03a : (points >= 150 ? 0xffe066 : 0xffffff);
     popup(text, pos, color, big);

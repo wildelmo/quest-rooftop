@@ -3,10 +3,11 @@
 // Contract (ARCHITECTURE.md): createObjects(ctx) ->
 //   { update(dt, t), grabbables(): Body[], spawnAt(id, position): Body, catalog }
 //
-// 14 throwables, each a single-draw-call procedural vertex-colored mesh
-// (shared cached geometry per type). Rack: one instance per world.rackAnchor,
-// kinematic (held=true) with idle bob/spin; respawns 3s after leaving the
-// rack with a pop-in scale animation + 'pop' sound. Personality hooks:
+// 17 throwables, each a single-draw-call procedural vertex-colored mesh
+// (shared cached geometry per type). Rack: one instance per world.rackAnchor
+// (a line-up along the front sill), kinematic (held=true) with idle bob/spin;
+// respawns 3s after leaving the rack with a pop-in scale animation + 'pop'
+// sound. Personality hooks:
 // splats (melon/egg/water balloon), duck squeaks, anvil falling whistle,
 // alarm-clock ring loop, rocket ignition, umbrella pop-open.
 //
@@ -282,6 +283,97 @@ function geoEgg() {
   return buildGeo(m);
 }
 
+function geoPropPlane() {
+  const m = newM();
+  const BALSA = 0xead9b0, RED = 0xd8493c;
+  // fuselage stick (nose at -Z) + nose block for the prop bearing
+  part(m, new THREE.BoxGeometry(0.022, 0.03, 0.36), BALSA, 0, 0, -0.01);
+  part(m, new THREE.BoxGeometry(0.034, 0.04, 0.035), RED, 0, 0, -0.185);
+  // main wing: two halves with a little dihedral
+  part(m, new THREE.BoxGeometry(0.21, 0.008, 0.085), (x, y, z, c) => {
+    c.set(x < -0.075 ? RED : BALSA);
+  }, -0.103, 0.028, -0.05, { rz: 0.12 });
+  part(m, new THREE.BoxGeometry(0.21, 0.008, 0.085), (x, y, z, c) => {
+    c.set(x > 0.075 ? RED : BALSA);
+  }, 0.103, 0.028, -0.05, { rz: -0.12 });
+  // tail plane + fin
+  part(m, new THREE.BoxGeometry(0.15, 0.006, 0.05), BALSA, 0, 0.008, 0.145);
+  part(m, new THREE.BoxGeometry(0.006, 0.06, 0.055), RED, 0, 0.04, 0.15);
+  // rubber band under the stick
+  part(m, new THREE.CylinderGeometry(0.006, 0.006, 0.3, 5), 0x8a6a4a, 0, -0.02, -0.02, { rx: Math.PI / 2 });
+  return buildGeo(m);
+}
+
+function geoPropBlades() {
+  const m = newM();
+  part(m, new THREE.BoxGeometry(0.015, 0.15, 0.008), 0xd8493c, 0, 0, 0);
+  part(m, new THREE.BoxGeometry(0.15, 0.015, 0.008), 0xd8493c, 0, 0, 0);
+  part(m, new THREE.SphereGeometry(0.012, 6, 5), 0x3a3a42, 0, 0, -0.005);
+  return buildGeo(m);
+}
+
+function geoSaucer() {
+  const m = newM();
+  // hull: squashed sphere, silver, with a ring of alternating lights
+  part(m, new THREE.SphereGeometry(0.13, 16, 10), (x, y, z, c) => {
+    if (Math.abs(y) < 0.028 && Math.hypot(x, z) > 0.11) {
+      const seg = Math.floor(((Math.atan2(z, x) + Math.PI) / (Math.PI * 2)) * 12);
+      c.set((seg % 2) ? 0xffd24a : 0x62e0d8); // rim lights
+    } else {
+      c.set(y > 0.04 ? 0xd4dde4 : 0xb4bec8);
+    }
+  }, 0, 0, 0, { sx: 1, sy: 0.34, sz: 1 });
+  // glass dome + tiny pilot
+  part(m, new THREE.SphereGeometry(0.052, 10, 7), 0x8fd6c9, 0, 0.036, 0, { sy: 0.9 });
+  part(m, new THREE.SphereGeometry(0.02, 6, 5), 0x69d84f, 0, 0.052, 0);
+  // three landing bumps
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2 + 0.5;
+    part(m, new THREE.SphereGeometry(0.016, 6, 5), 0x8a929c,
+      Math.cos(a) * 0.07, -0.038, Math.sin(a) * 0.07);
+  }
+  return buildGeo(m);
+}
+
+function geoSaucerGlow() {
+  const m = newM();
+  part(m, new THREE.CylinderGeometry(0.075, 0.05, 0.035, 12, 1, true), 0x9fffe8, 0, -0.055, 0);
+  return buildGeo(m);
+}
+
+function geoFighter() {
+  const m = newM();
+  const HULL = 0xd8dde4, DARK = 0x4a5560, ACC = 0x69d84f;
+  // fuselage (nose at -Z) + cockpit
+  part(m, new THREE.BoxGeometry(0.05, 0.042, 0.2), HULL, 0, 0, 0.01);
+  part(m, new THREE.ConeGeometry(0.028, 0.09, 6), HULL, 0, 0, -0.13, { rx: -Math.PI / 2 });
+  part(m, new THREE.SphereGeometry(0.026, 8, 6), 0x2b3a4a, 0, 0.03, -0.03, { sz: 1.6 });
+  // swept wings with glowing tips
+  part(m, new THREE.BoxGeometry(0.115, 0.008, 0.085), (x, y, z, c) => {
+    c.set(x < -0.045 ? ACC : HULL);
+  }, -0.078, -0.006, 0.045, { ry: -0.45 });
+  part(m, new THREE.BoxGeometry(0.115, 0.008, 0.085), (x, y, z, c) => {
+    c.set(x > 0.045 ? ACC : HULL);
+  }, 0.078, -0.006, 0.045, { ry: 0.45 });
+  // twin engine cans at the tail
+  part(m, new THREE.CylinderGeometry(0.016, 0.02, 0.06, 7), DARK, -0.028, 0, 0.115, { rx: Math.PI / 2 });
+  part(m, new THREE.CylinderGeometry(0.016, 0.02, 0.06, 7), DARK, 0.028, 0, 0.115, { rx: Math.PI / 2 });
+  part(m, new THREE.BoxGeometry(0.006, 0.05, 0.06), ACC, 0, 0.035, 0.1); // fin
+  return buildGeo(m);
+}
+
+function geoFighterFlame() {
+  const m = newM();
+  part(m, new THREE.ConeGeometry(0.017, 0.1, 7), 0x7fe8ff, -0.028, -0.01, 0);
+  part(m, new THREE.ConeGeometry(0.017, 0.1, 7), 0x7fe8ff, 0.028, -0.01, 0);
+  part(m, new THREE.ConeGeometry(0.009, 0.07, 7), 0xffffff, -0.028, -0.02, 0);
+  part(m, new THREE.ConeGeometry(0.009, 0.07, 7), 0xffffff, 0.028, -0.02, 0);
+  const g = buildGeo(m);
+  g.rotateX(Math.PI / 2);       // apex -> +Z (exhaust points backward)
+  g.translate(0, 0, 0.19);
+  return g;
+}
+
 const ROCKET_RACK_Q = new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0));
 
 // =====================================================================
@@ -506,6 +598,102 @@ export function createObjects(ctx) {
       },
     },
     {
+      id: 'propplane', label: 'Prop Glider',
+      mass: 0.05, radius: 0.12, drag: 0.02, restitution: 0.08, windFactor: 0.25,
+      aero: { type: 'prop' }, lift: 0.07,
+      build() {
+        const mesh = new THREE.Mesh(getGeo('propplane', geoPropPlane), MAT);
+        const prop = new THREE.Mesh(getGeo('propBlades', geoPropBlades), MAT);
+        prop.position.set(0, 0, -0.21);
+        mesh.add(prop);
+        mesh.userData.prop = prop;
+        return mesh;
+      },
+      fly(b, dt) {
+        const prop = b.mesh.userData && b.mesh.userData.prop;
+        if (!prop) return;
+        // full-speed blur while the band unwinds, lazy windmill after
+        prop.rotation.z += (b.data && b.data.burning ? 55 : 7) * dt;
+      },
+    },
+    {
+      id: 'ufo', label: 'Flying Saucer',
+      mass: 0.3, radius: 0.13, drag: 0.008, restitution: 0.5, windFactor: 0.05,
+      aero: { type: 'ufo' }, lift: 0.1,
+      build() {
+        const mesh = new THREE.Mesh(getGeo('saucer', geoSaucer), MAT);
+        const glow = new THREE.Mesh(getGeo('saucerGlow', geoSaucerGlow), MAT_FLAME);
+        glow.visible = false;
+        mesh.add(glow);
+        mesh.userData.glow = glow;
+        return mesh;
+      },
+      onImpact(body, hit) {
+        const sp = hitSpeed(hit);
+        if (sp > 1.5 && hit && hit.surface !== 'water') {
+          play('clang', hitPos(body, hit), Math.min(1.1, 0.3 + sp / 10));
+        }
+      },
+      fly(b, dt) {
+        const d = b.data;
+        const glow = b.mesh.userData && b.mesh.userData.glow;
+        if (d && d.burning) {
+          // powered: constant eerie spin + pulsing underglow
+          b.mesh.rotateY(9 * dt);
+          if (glow) {
+            glow.visible = true;
+            const s = 0.85 + 0.3 * Math.abs(Math.sin(now * 11 + (b._seed || 0)));
+            glow.scale.set(s, 1, s);
+          }
+          d._hum = (d._hum === undefined ? 0 : d._hum) - dt;
+          if (d._hum <= 0) { play('ring', b.mesh.position, 0.16); d._hum = 0.5; }
+        } else if (glow && glow.visible) glow.visible = false;
+      },
+    },
+    {
+      id: 'fighter', label: 'Mini Starfighter',
+      mass: 0.25, radius: 0.09, drag: 0.01, restitution: 0.3, windFactor: 0.04,
+      aero: { type: 'rocket' }, lift: 0.09,
+      build() {
+        const mesh = new THREE.Mesh(getGeo('fighter', geoFighter), MAT);
+        const flame = new THREE.Mesh(getGeo('fighterFlame', geoFighterFlame), MAT_FLAME);
+        flame.visible = false;
+        mesh.add(flame);
+        mesh.userData.flame = flame;
+        return mesh;
+      },
+      onThrow(body) {
+        const d = body.data;
+        d.igniteDelay = 0.25; // engines light almost immediately
+        d.burn = 2.4;
+        d.thrust = 13;        // gentler than the toy rocket: strafing run, not launch
+        d._ign = false;
+        d._smk = 0;
+      },
+      onImpact(body, hit) {
+        const d = body.data;
+        const sp = hitSpeed(hit);
+        if (d && d.burning && sp > 6) { // hard crash flames out
+          d.burn = 0;
+          fx('dust', hitPos(body, hit), 0.6);
+          play('clang', hitPos(body, hit), 0.7);
+        }
+      },
+      fly(b, dt) {
+        const d = b.data;
+        if (!d) return;
+        const flame = b.mesh.userData && b.mesh.userData.flame;
+        if (d.burning) {
+          if (!d._ign) { d._ign = true; play('rocket', b.mesh.position, 0.7); }
+          if (flame) {
+            flame.visible = true;
+            const f = 0.8 + 0.3 * Math.sin(now * 47 + (b._seed || 0));
+            flame.scale.set(f, f, 0.85 + 0.4 * Math.abs(Math.sin(now * 33)));
+          }
+        } else if (flame && flame.visible) flame.visible = false;
+      },
+    },
+    {
       id: 'umbrella', label: 'Umbrella',
       mass: 0.9, radius: 0.2, drag: 0.05, restitution: 0.15, windFactor: 0.5,
       aero: { type: 'umbrella' }, lift: 0.29,
@@ -645,18 +833,18 @@ export function createObjects(ctx) {
       }
     }
   } catch (e) { /* stub-safe */ }
-  if (!anchors.length) { // world stub fallback: mirror the real rack layout
-    const ry = ((typeof ROOF_Y === 'number') ? ROOF_Y : 24) + 0.95;
-    for (let r = 0; r < 2; r++) {
-      for (let i = 0; i < 7; i++) {
-        anchors.push(new THREE.Vector3(-1.95 + i * 0.65, ry, r === 0 ? -4.0 : -3.2));
-      }
+  if (!anchors.length) { // world stub fallback: mirror the real sill layout
+    const ry = ((typeof ROOF_Y === 'number') ? ROOF_Y : 24) + 0.78;
+    for (let i = 0; i < 17; i++) {
+      anchors.push(new THREE.Vector3(-6 + i * 0.75, ry, -6.89));
     }
   }
 
-  // Small precise stuff up front, heavy comedy in the back row.
-  const ORDER = ['paper', 'baseball', 'basketball', 'frisbee', 'duck', 'waterballoon', 'egg',
-    'bowling', 'anvil', 'watermelon', 'rocket', 'umbrella', 'alarmclock', 'beachball'];
+  // One line-up along the sill: flyers dead center where you spawn,
+  // heavy comedy toward the ends.
+  const ORDER = ['anvil', 'bowling', 'watermelon', 'alarmclock', 'duck', 'baseball',
+    'egg', 'paper', 'propplane', 'ufo', 'fighter', 'frisbee', 'basketball',
+    'waterballoon', 'rocket', 'umbrella', 'beachball'];
   const slots = [];
   for (let i = 0; i < anchors.length; i++) {
     slots.push({

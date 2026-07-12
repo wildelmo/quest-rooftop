@@ -1,35 +1,39 @@
 # CHUCK CITY — Rooftop Physics Playground (WebXR / Meta Quest)
 
 **One-liner:** You're on the roof of the tallest building in a sunny low-poly
-town, next to a rack of ridiculous objects. Throw them off. Everything falls,
-flies, bounces, splats, or shatters exactly the way your inner 8-year-old
-hopes it will. Score points by hitting targets in the streets below.
+town. The front sill is lined with ridiculous objects. Throw them off.
+Everything falls, flies, bounces, splats, or shatters exactly the way your
+inner 8-year-old hopes it will. It's a sandbox, not a game — no score, just
+a city below that reacts to whatever you chuck at it.
 
 ## Why it's fun
 
 The core loop is *anticipation → flight → payoff*:
 
-1. **Anticipation** — you pick an object off the rack. Each one telegraphs its
-   personality (an anvil feels absurd next to a paper airplane).
+1. **Anticipation** — you pick an object off the sill. Each one telegraphs its
+   personality (an anvil feels absurd next to a paper airplane). Pass it
+   between hands to line up the perfect grip.
 2. **Flight** — every object has hand-tuned aerodynamics. Watching a paper
    airplane carve a long lazy arc over the street is the game.
 3. **Payoff** — every landing is celebrated: splats, glass, dust rings,
-   distant thuds with echo, score popups, combo streaks, and a moment of
+   distant thuds with echo, celebration labels ("SWISH!"), and a moment of
    slow-motion when you nail a great shot.
 
-No locomotion (you stand on one rooftop) → zero motion sickness, instant
-onboarding, pure throwing skill.
+Locomotion is rooftop-bounded (the roof is the play area, you can never walk
+off the edge): left-stick smooth move, snap turn, and a teleport arc on the
+right stick. Desktop gets WASD.
 
 ## Setting
 
 Midday, warm sun, a small stylized city (low-poly, vertex-colored, no
-textures). You stand on an 8-story rooftop with a parapet you can lean over.
-Below: streets with moving cars, a park with a basketball hoop, dumpsters,
-awnings, a trampoline, a rooftop pool across the street, and a wall of
-breakable windows on the office building opposite. A flag on your roof shows
-the wind.
+textures). You stand on an 8-story rooftop. The whole throwing edge is a
+thin, waist-high sill — easy to lean over, easy to toss across — and the
+objects live right on it, lined up and packed close. Below: streets with a
+delivery truck, a park with a basketball hoop, a dumpster, a trampoline, a
+rooftop pool across the street, and a wall of breakable windows on the
+office building opposite. A flag on your roof shows the wind.
 
-## The rack — throwable objects
+## The sill — throwable objects
 
 Each object has a distinct physics personality:
 
@@ -45,28 +49,32 @@ Each object has a distinct physics personality:
 | Frisbee | Spin-stabilized glide, curves beautifully |
 | Rubber duck | Erratic bounces, squeaks on every hit |
 | Toy rocket | Half a second after release, the engine lights |
+| Prop glider | Rubber-band prop: powered climb-out, then a long dreamy glide |
+| Flying saucer | Anti-gravity for ~7s: hovers, weaves, survives wall bounces |
+| Mini starfighter | Engines light instantly — a fast, flat strafing run |
 | Umbrella | Pops open and drifts down at 1.5 m/s, swaying |
 | Alarm clock | Rings the whole way down, stops dead on impact |
 | Beach ball | Nearly floats, pushed around by the wind |
 | Egg | The most fragile thing. Perfect splat |
 
-Objects respawn on the rack a few seconds after being thrown, with a little
-pop animation. You can dual-wield.
+Objects respawn on the sill a few seconds after being thrown, with a little
+pop animation. You can dual-wield, and grabbing an object out of your other
+hand transfers it — pick up with the left, orient it, re-grip with the
+right, throw.
 
-## Targets & scoring
+## Targets (no score — just reactions)
 
-- **Dumpster** (open lid) — "TRASH!" +150
-- **Basketball hoop** in the park — +300, ball must pass down through the ring
-- **Rooftop pool** across the street — +200 and a huge splash
-- **Moving delivery truck** with an open bed — +500, it's moving, lead your shot
-- **Bullseye** painted on the intersection — up to +250 by ring
-- **Trampoline** — objects bounce back up toward you; catch one mid-air: +1000 "BOOMERANG!"
-- **Breakable windows** on the office building — +100 each, they respawn
-- **Pigeons** — scatter dramatically (never harmed), +50 "FLOCK OFF!"
+- **Dumpster** (open lid) — "TRASH!"
+- **Basketball hoop** in the park — "SWISH!" if it drops through the ring
+- **Rooftop pool** across the street — "SPLASHDOWN!" and a huge splash
+- **Moving delivery truck** with an open bed — "SPECIAL DELIVERY!"
+- **Bullseye** painted on the intersection
+- **Trampoline** — objects bounce back up toward you; catch one mid-air: "BOOMERANG!"
+- **Breakable windows** on the office building — they respawn after a while
+- **Pigeons** — scatter dramatically (never harmed), "FLOCK OFF!"
 
-**Combos:** hits within 6 seconds of each other build a multiplier (×2, ×3…).
-**Slow-mo:** shots worth ≥300 trigger ~1.2s of 30% time so you can savor it.
-**Skill bonus:** +1 point per meter of flight distance.
+Great shots still trigger confetti and ~1.2s of slow-motion so you can savor
+them — there's just no scoreboard keeping receipts.
 
 ## Feel (the important part)
 
@@ -79,8 +87,8 @@ pop animation. You can dual-wield.
   whoosh tied to airspeed, doppler-ish pitch, distant impacts get echo/delay,
   glass shatter, splats, duck squeaks, clock ringing, wind ambience.
 - **Particles:** dust rings, water droplets, melon chunks, glass shards,
-  confetti on combo milestones.
-- **Score popups** float up from the impact point in 3D.
+  confetti on the big moments.
+- **Celebration labels** float up from the impact point in 3D.
 
 ## Quest performance budget
 
@@ -92,9 +100,12 @@ blob under held objects, `renderer.xr.setFoveation(1)`.
 ## Controls
 
 - **VR (Quest):** grip or trigger to grab, swing and release to throw.
-  Right stick snap-turn. That's the whole tutorial.
-- **Desktop fallback (for quick testing/sharing):** mouse-look, scroll or keys
-  1–9 to pick an object, hold and release left mouse to throw with power.
+  Grab from your other hand to pass an object between hands. Left stick
+  moves (head-relative, roof-bounded), right stick snap-turns, push the
+  right stick forward to aim a teleport arc and release to blink there.
+- **Desktop fallback (for quick testing/sharing):** mouse-look, WASD to
+  walk, scroll or keys 1–9 to pick an object, hold and release left mouse
+  to throw with power.
 
 ## Tech
 
