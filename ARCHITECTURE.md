@@ -59,7 +59,7 @@ Constants in `src/constants.js` — the single shared-values file.
 { mesh, velocity: V3, angularVelocity: V3, mass, radius,   // bounding sphere
   drag,               // 0..1-ish linear drag coefficient
   restitution,        // 0..1 bounce
-  aero: null | { type: 'glider'|'frisbee'|'balloon'|'rocket'|'umbrella', ...tuning },
+  aero: null | { type: 'glider'|'frisbee'|'balloon'|'rocket'|'umbrella'|'prop'|'ufo', ...tuning },
   windFactor,         // 0..1 how much wind pushes it
   held: false, alive: true,
   onImpact(hit) => 'destroy'|'keep'|undefined,   // set by objects.js
@@ -71,8 +71,13 @@ Integration: semi-implicit Euler. Gravity `-9.8 * mass-independent`. Aero:
   gentle bank-turn from roll; caps sink rate → long dreamy glides.
 - `frisbee`: lift while `angularVelocity.length()` high, lateral curve.
 - `balloon`: high drag, strong `windFactor`, low terminal velocity.
-- `rocket`: after `data.igniteDelay`, thrust along mesh forward for `data.burn` s.
+- `rocket`: after `data.igniteDelay`, thrust along mesh forward for `data.burn` s
+  (`data.thrust` overrides — the mini starfighter reuses this type).
 - `umbrella`: terminal velocity clamp ~1.5 m/s + sinusoidal sway once `data.open`.
+- `prop`: rubber-band prop glider — thrust along the nose + gentle climb for
+  `burnTime` s (sets `data.burning`), then hands off to the glider model.
+- `ufo`: cancels gravity for `hoverTime` s, holds cruise speed along its
+  heading with a lateral weave + hover bob, then falls ballistically.
 
 **Colliders**: `{ type: 'aabb', min: V3, max: V3, surface, restitution?, name? }`
 or `{ type: 'plane', y, surface }` (street). Sphere-vs-AABB resolution, slide +
@@ -86,12 +91,12 @@ watches) when `speed < 0.3` for 2s, or y < -5, or 30s lifetime.
 
 Builds sky (gradient dome), sun + hemisphere light, fog, low-poly city
 (instanced boxes w/ vertex-color windows), roads, park, trees, parked cars,
-distant hills, drifting clouds, the player rooftop (parapet, AC units, vents,
-object rack table, wind flag animated by ctx.wind). Registers all building
-AABBs + street plane with physics. Returns:
+distant hills, drifting clouds, the player rooftop (0.9 m parapet on the
+sides/back, a thin waist-high sill along the whole throwing edge, AC units,
+vents, wind flag animated by ctx.wind). Registers all building AABBs +
+street plane with physics. Returns:
 ```js
-{ update(dt, t), rackAnchors: [Vector3 × ~14],       // world-space slots on the rack
-  scoreboardAnchor: Object3D,                        // where ui mounts scoreboard
+{ update(dt, t), rackAnchors: [Vector3 × 17],  // line-up along the front sill cap
   facingBuilding: { windowGrid... } // geometry info targets.js uses for breakable windows
 }
 ```
@@ -103,7 +108,7 @@ targets.js adds the panes.
 
 ## src/objects.js — createObjects(ctx)
 
-Catalog of ~14 throwables. Procedural low-poly meshes (BufferGeometry
+Catalog of 17 throwables. Procedural low-poly meshes (BufferGeometry
 primitives, vertex colors / flat MeshLambertMaterial). Each catalog entry:
 ```js
 { id, label, build(): Mesh, mass, radius, drag, restitution, windFactor,
@@ -124,27 +129,34 @@ Rack items are physics-inert (held=true style kinematic) until grabbed/thrown.
 XR controllers (grip squeeze OR trigger to grab within 0.28m, release throws)
 with velocity estimator: ring buffer of (pos, quat, time) over last 120ms,
 weighted least-squares linear velocity + finite-difference angular velocity,
-throw boost ×1.25. Haptic pulses (hover 0.1, grab 0.4, release 0.6). Snap
-turn on right stick (30°, rotates playerRig). Desktop fallback when no XR:
-pointer-lock mouse look, keys 1–9/scroll select catalog item, hold LMB charges
-power (0.3→18 m/s), release throws from camera. Listens for big `target-hit`
-of own thrown body → distant haptic rumble.
+throw boost ×1.25. Haptic pulses (hover 0.1, grab 0.4, release 0.6).
+Grabbing a body held by the OTHER hand transfers it (the other hand lets go
+with no throw impulse). Locomotion, all clamped so the head stays on the
+rooftop rectangle: left stick smooth move (head-relative), right stick x
+snap turn (30°, pivots around the head), right stick pushed forward aims a
+teleport arc (parabola + ring marker), release commits the blink; teleports
+and snap turns invalidate the velocity-estimator samples. Desktop fallback
+when no XR: pointer-lock mouse look, WASD walk (same roof clamp), keys
+1–9/scroll select catalog item, hold LMB charges power (0.3→18 m/s), release
+throws from camera. Listens for big `target-hit` of own thrown body →
+distant haptic rumble.
 
 ## src/targets.js — createTargets(ctx)
 
 Places targets (positions derived from constants + world layout), registers
 their colliders/onHit volumes, runs moving truck + pigeons, breakable window
-panes on `world.facingBuilding` grid, scoring: combo (6s window, ×1..×5),
-flight-distance bonus, emits `score` + `target-hit` + `slowmo` (for points ≥
-300). Tracks total score (`.score`). Windows respawn after 20s.
+panes on `world.facingBuilding` grid. Still emits `score` + `target-hit` +
+`slowmo` events with internal point values, but points only decide how big
+the celebration is (popup label / confetti / slow-mo / haptics) — nothing
+displays a number or a total. Windows respawn after 20s.
 
 ## src/effects.js — createEffects(ctx)
 
 Pooled particle bursts: `dust(pos, scale)`, `splash(pos, scale)`,
 `chunks(pos, color, n)`, `glass(pos)`, `confetti(pos)`, `splatDecal(pos,
 normal, color, r)` (fading circle decals, pooled, max 40), `popup(text, pos,
-color?)` canvas-sprite score text floating up, blob shadow helper for held
-objects. Owns slow-mo: on `slowmo` event ease `ctx.timeScale` → 0.3 and back
+color?)` canvas-sprite celebration label floating up (label only — never
+points), blob shadow helper for held objects. Owns slow-mo: on `slowmo` event ease `ctx.timeScale` → 0.3 and back
 over duration (uses rawDt). All particles one instanced mesh per pool type.
 
 ## src/audio.js — createAudio(ctx)
@@ -166,9 +178,8 @@ Wind + light city ambience loops.
 
 DOM start overlay: title, "Enter VR" (requestSession `immersive-vr`, optional
 features `local-floor`), "Play on Desktop" button, controls hint; hides on
-start, calls `audio.resume()`. In-world: scoreboard billboard mounted at
-`world.scoreboardAnchor` (canvas texture: score, combo meter, last label),
-updates on `score` events. Shows end-of-session nothing — it's a sandbox.
+start, calls `audio.resume()`, re-shows on XR session end. No scoreboard,
+no score chip — it's a sandbox.
 
 ## Rules for all modules
 

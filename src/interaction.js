@@ -6,16 +6,22 @@
 // REAL (unscaled) time; angular velocity from quaternion finite differences;
 // ×THROW_BOOST hero-arm plus ω×r "whip" contribution. Haptics: hover 0.1,
 // grab 0.4, release 0.6, distant rumble on big target-hit of own throw.
-// Right-stick snap turn (30°, debounced, pivots around the head).
 //
-// Desktop fallback (only when no XR session): pointer-lock mouse look,
-// 1-9/0 + wheel select from ctx.objects.catalog (DOM chip), hold LMB to
-// charge 0.3→18 m/s over 1.1s (DOM power bar), release to throw from camera.
+// Locomotion (rooftop-bounded): left stick smooth-move (head-relative),
+// right stick x snap turn (30°, debounced, pivots around the head), right
+// stick push-forward aims a teleport arc, release to blink there. Grabbing
+// an object held in the OTHER hand transfers it (re-grip / re-orient).
+//
+// Desktop fallback (only when no XR session): pointer-lock mouse look, WASD
+// to walk the roof, 1-9/0 + wheel select from ctx.objects.catalog (DOM
+// chip), hold LMB to charge 0.3→18 m/s over 1.1s, release to throw.
 //
 // Contract: ARCHITECTURE.md — createInteraction(ctx) returns { update }.
 
 import * as THREE from 'three';
-import { GRAB_RADIUS, THROW_BOOST, ROOF_Y } from './constants.js';
+import {
+  GRAB_RADIUS, THROW_BOOST, ROOF_Y, BUILDING_HALF_W, BUILDING_HALF_D,
+} from './constants.js';
 
 // ---------- hoisted temporaries (zero per-frame allocations) ----------
 const _v1 = new THREE.Vector3();
@@ -41,11 +47,22 @@ const CHARGE_MAX = 18;
 const CHARGE_TIME = 1.1;
 const MOUSE_SENS = 0.0022;
 const PITCH_LIMIT = 1.45;
-// Spawn offsets: a typical guardian is ~2x2m and there is no locomotion, so
-// VR must start close enough that the parapet notch is one step away and the
-// rack table (world.js puts it just behind this spot) is within arm's reach.
-const VR_SPAWN_Z = -5.0;
-const DESKTOP_SPAWN_Z = -6.6;
+// Locomotion tuning. The roof is the play area: movement (smooth, teleport,
+// desktop WASD) clamps the HEAD position to the rooftop rectangle.
+const MOVE_SPEED = 2.7;        // m/s smooth locomotion
+const MOVE_DEAD = 0.16;        // thumbstick deadzone
+const DESKTOP_SPEED = 3.4;     // m/s WASD
+const TELE_ON = 0.65;          // right stick forward-push engages teleport aim
+const TELE_OFF = 0.4;          // release threshold commits the teleport
+const TELE_SPEED = 8.5;        // teleport arc launch speed
+const ARC_N = 28;              // arc polyline points
+const BHW = (typeof BUILDING_HALF_W === 'number') ? BUILDING_HALF_W : 9;
+const BHD = (typeof BUILDING_HALF_D === 'number') ? BUILDING_HALF_D : 7;
+const ROOF_MARGIN = 0.5;       // keep the head off the side/back parapets
+const FRONT_MARGIN = 0.42;     // can get close to the thin front sill
+// Spawn: dead center in front of the sill line-up of objects.
+const VR_SPAWN_Z = -5.6;
+const DESKTOP_SPAWN_Z = -6.2;
 
 export function createInteraction(ctx) {
   ctx = ctx || {};
@@ -54,7 +71,8 @@ export function createInteraction(ctx) {
   const playerRig = ctx.playerRig;
   const camera = ctx.camera;
 
-  let realT = 0; // real (unscaled) time accumulator, fed by rawDt
+  let realT = 0;   // real (unscaled) time accumulator, fed by rawDt
+  let frameDt = 0; // this frame's real dt (locomotion uses unscaled time)
 
   function emit(name, payload) {
     try { if (events && events.emit) events.emit(name, payload); } catch (e) {}
@@ -173,7 +191,9 @@ export function createInteraction(ctx) {
     if (hand.held && !hand.selectOn && !hand.squeezeOn) releaseHand(hand);
   }
 
-  // nearest grabbable body within reach of the controller; null if none
+  // nearest grabbable body within reach of the controller; null if none.
+  // Bodies held by the OTHER hand are fair game — that's the hand-to-hand
+  // transfer (pick up in the left, re-grip with the right, throw).
   function findNearest(hand) {
     if (!hand.controller) return null;
     hand.controller.getWorldPosition(_v1);
@@ -183,14 +203,19 @@ export function createInteraction(ctx) {
     for (let i = 0; i < list.length; i++) {
       const b = list[i];
       if (!b || !b.mesh || b.alive === false) continue;
-      if (b.held && b !== hand.held) {
-        // racked bodies are kinematic (held=true) but grabbable; skip only
-        // ones actually in a hand
-        if (b === hands[0].held || b === hands[1].held) continue;
-      }
+      if (b === hand.held) continue; // already in this hand
       const r = GRAB_RADIUS + (typeof b.radius === 'number' ? b.radius * 0.5 : 0);
       const d = b.mesh.position.distanceToSquared(_v1);
       if (d < r * r && d < bestD) { bestD = d; best = b; }
+    }
+    // objects.grabbables() excludes in-hand bodies, so offer the other
+    // hand's held object as a transfer candidate here.
+    const other = hands[1 - hand.index];
+    const ob = other ? other.held : null;
+    if (ob && ob.mesh && ob.alive !== false) {
+      const r = GRAB_RADIUS + (typeof ob.radius === 'number' ? ob.radius * 0.5 : 0);
+      const d = ob.mesh.position.distanceToSquared(_v1);
+      if (d < r * r && d < bestD) best = ob;
     }
     return best;
   }
@@ -198,6 +223,12 @@ export function createInteraction(ctx) {
   function tryGrab(hand) {
     const body = findNearest(hand);
     if (!body || !body.mesh) return;
+    const other = hands[1 - hand.index];
+    if (other && other.held === body) {
+      // hand-off: the other hand just lets go (no throw impulse)
+      other.held = null;
+      pulse(other, 0.15, 25);
+    }
     body.held = true;
     hand.held = body;
     hand.hoverBody = null;
@@ -334,17 +365,36 @@ export function createInteraction(ctx) {
       hand.hint.scale.set(sc, sc, sc);
     }
 
-    // snap turn: right thumbstick x (xr-standard axes[2], fallback axes[0])
-    if (hand.handedness === 'right' && hand.inputSource && hand.inputSource.gamepad) {
+    // thumbsticks (xr-standard axes[2]/[3], fallback axes[0]/[1]):
+    // left = smooth locomotion, right = snap turn + teleport aim
+    if (hand.inputSource && hand.inputSource.gamepad) {
       const axes = hand.inputSource.gamepad.axes;
-      let x = 0;
-      if (axes && axes.length > 2) x = axes[2] || 0;
-      if (axes && Math.abs(x) < 0.01 && axes.length > 0) x = axes[0] || 0;
-      if (!hand.snapLatched && Math.abs(x) > SNAP_ON) {
-        hand.snapLatched = true;
-        snapTurn(x > 0 ? -SNAP_ANGLE : SNAP_ANGLE);
-      } else if (hand.snapLatched && Math.abs(x) < SNAP_OFF) {
-        hand.snapLatched = false;
+      let x = 0, y = 0;
+      if (axes && axes.length > 3) { x = axes[2] || 0; y = axes[3] || 0; }
+      if (axes && Math.abs(x) < 0.01 && Math.abs(y) < 0.01 && axes.length > 1) {
+        x = axes[0] || 0; y = axes[1] || 0;
+      }
+      if (hand.handedness === 'left') {
+        moveRig(x, y);
+      } else {
+        // teleport: push the stick forward to aim, let go to blink there
+        if (!teleAiming && y < -TELE_ON) { teleAiming = true; teleHas = false; }
+        if (teleAiming) {
+          if (y > -TELE_OFF) {
+            teleAiming = false;
+            commitTeleport(hand);
+          } else {
+            updateTeleportArc(hand);
+          }
+        }
+        if (!teleAiming) { // snap turn (parked while aiming a teleport)
+          if (!hand.snapLatched && Math.abs(x) > SNAP_ON) {
+            hand.snapLatched = true;
+            snapTurn(x > 0 ? -SNAP_ANGLE : SNAP_ANGLE);
+          } else if (hand.snapLatched && Math.abs(x) < SNAP_OFF) {
+            hand.snapLatched = false;
+          }
+        }
       }
     }
   }
@@ -352,6 +402,118 @@ export function createInteraction(ctx) {
   function invalidateSamples(hand) {
     hand.sampleN = 0;
     for (let i = 0; i < SAMPLE_COUNT; i++) hand.samples[i].t = -1e9;
+  }
+
+  // =====================================================================
+  // Locomotion (VR) — the rooftop is the play area; every mover clamps the
+  // HEAD position to the roof rectangle so you can't walk off the edge.
+  // =====================================================================
+  function clampRigByHead() {
+    if (!camera || !playerRig) return;
+    camera.getWorldPosition(_v5);
+    const cx = Math.max(-BHW + ROOF_MARGIN, Math.min(BHW - ROOF_MARGIN, _v5.x));
+    const cz = Math.max(-BHD + FRONT_MARGIN, Math.min(BHD - ROOF_MARGIN, _v5.z));
+    playerRig.position.x += cx - _v5.x;
+    playerRig.position.z += cz - _v5.z;
+  }
+
+  // smooth locomotion: left stick, head-relative, squared response curve
+  function moveRig(ax, ay) {
+    if (!camera || !playerRig) return;
+    const mag = Math.sqrt(ax * ax + ay * ay);
+    if (mag < MOVE_DEAD) return;
+    const sc = Math.min(1, (mag - MOVE_DEAD) / (1 - MOVE_DEAD));
+    camera.getWorldQuaternion(_q3);
+    _v4.set(0, 0, -1).applyQuaternion(_q3);
+    _v4.y = 0;
+    if (_v4.lengthSq() < 1e-4) return; // looking straight down
+    _v4.normalize();
+    _v5.set(1, 0, 0).applyQuaternion(_q3);
+    _v5.y = 0;
+    _v5.normalize();
+    const k = (MOVE_SPEED * sc * sc * frameDt) / mag;
+    playerRig.position.addScaledVector(_v4, -ay * k);
+    playerRig.position.addScaledVector(_v5, ax * k);
+    clampRigByHead();
+  }
+
+  // teleport arc: parabola from the right controller, marker on the roof
+  let teleAiming = false;
+  let teleHas = false;
+  let teleX = 0, teleZ = 0;
+  let arcLine = null, arcMarker = null, arcPositions = null;
+
+  function ensureTeleportVisuals() {
+    if (arcLine || !ctx.scene || !ctx.scene.add) return;
+    try {
+      arcPositions = new Float32Array(ARC_N * 3);
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(arcPositions, 3));
+      arcLine = new THREE.Line(g, new THREE.LineBasicMaterial({
+        color: 0x7dd3fc, transparent: true, opacity: 0.9,
+      }));
+      arcLine.frustumCulled = false;
+      arcLine.visible = false;
+      ctx.scene.add(arcLine);
+      arcMarker = new THREE.Mesh(
+        new THREE.RingGeometry(0.16, 0.25, 24).rotateX(-Math.PI / 2),
+        new THREE.MeshBasicMaterial({
+          color: 0x7dd3fc, transparent: true, opacity: 0.85, depthWrite: false,
+        }));
+      arcMarker.visible = false;
+      ctx.scene.add(arcMarker);
+    } catch (e) { arcLine = null; arcMarker = null; }
+  }
+
+  function hideTeleportVisuals() {
+    if (arcLine) arcLine.visible = false;
+    if (arcMarker) arcMarker.visible = false;
+  }
+
+  function updateTeleportArc(hand) {
+    ensureTeleportVisuals();
+    if (!arcLine || !hand.controller) return;
+    hand.controller.getWorldPosition(_v4);
+    hand.controller.getWorldQuaternion(_q3);
+    _v5.set(0, 0, -1).applyQuaternion(_q3).multiplyScalar(TELE_SPEED);
+    const step = 0.045;
+    let px = _v4.x, py = _v4.y, pz = _v4.z;
+    let vx = _v5.x, vy = _v5.y, vz = _v5.z;
+    let landed = false;
+    for (let i = 0; i < ARC_N; i++) {
+      arcPositions[i * 3] = px;
+      arcPositions[i * 3 + 1] = py;
+      arcPositions[i * 3 + 2] = pz;
+      if (!landed) {
+        px += vx * step; py += vy * step; pz += vz * step;
+        vy -= 9.8 * step;
+        if (py <= ROOF_Y && vy < 0) { py = ROOF_Y; landed = true; }
+      }
+    }
+    teleX = Math.max(-BHW + ROOF_MARGIN, Math.min(BHW - ROOF_MARGIN, px));
+    teleZ = Math.max(-BHD + FRONT_MARGIN, Math.min(BHD - ROOF_MARGIN, pz));
+    teleHas = true;
+    arcLine.geometry.attributes.position.needsUpdate = true;
+    arcLine.visible = true;
+    if (arcMarker) {
+      arcMarker.position.set(teleX, ROOF_Y + 0.02, teleZ);
+      arcMarker.visible = true;
+    }
+  }
+
+  function commitTeleport(hand) {
+    hideTeleportVisuals();
+    if (!teleHas || !camera || !playerRig) return;
+    teleHas = false;
+    camera.getWorldPosition(_v5);
+    playerRig.position.x += teleX - _v5.x;
+    playerRig.position.z += teleZ - _v5.z;
+    clampRigByHead();
+    // rig jumped: stale samples would read as a monster throw
+    invalidateSamples(hands[0]);
+    invalidateSamples(hands[1]);
+    pulse(hand, 0.3, 40);
+    playSound('pop', { intensity: 0.45 });
   }
 
   function snapTurn(angle) {
@@ -507,11 +669,10 @@ export function createInteraction(ctx) {
     emit('throw', { body, speed });
   }
 
-  // Deterministic spawn per mode. Desktop stands the rig at the parapet notch
-  // (no locomotion; the fixed camera must see over the edge). VR spawns one
-  // step from the notch with the rack table within reach, and the pose is
-  // reset on every XR session start so a desktop session (rig at the notch,
-  // mouse-look yaw on the rig) can't leak into a later 'Re-enter VR'.
+  // Deterministic spawn per mode: both start centered in front of the sill
+  // line-up (locomotion can take it from there). The pose is reset on every
+  // XR session start so a desktop session (mouse-look yaw on the rig) can't
+  // leak into a later 'Re-enter VR'.
   function placeRig(z) {
     try {
       if (playerRig && playerRig.position) {
@@ -589,14 +750,38 @@ export function createInteraction(ctx) {
       const k = e.key;
       if (k >= '1' && k <= '9') { selIdx = k.charCodeAt(0) - 49; updateChip(); }
       else if (k === '0') { selIdx = 9; updateChip(); }
+      if (e.code in moveKeys) moveKeys[e.code] = true;
     });
+    document.addEventListener('keyup', (e) => {
+      if (e.code in moveKeys) moveKeys[e.code] = false;
+    });
+  }
+
+  const moveKeys = { KeyW: false, KeyA: false, KeyS: false, KeyD: false };
+
+  function desktopMove() {
+    if (!playerRig) return;
+    let fw = 0, rt = 0;
+    if (moveKeys.KeyW) fw += 1;
+    if (moveKeys.KeyS) fw -= 1;
+    if (moveKeys.KeyD) rt += 1;
+    if (moveKeys.KeyA) rt -= 1;
+    if (!fw && !rt) return;
+    const yaw = playerRig.rotation.y;
+    const inv = (fw && rt) ? Math.SQRT1_2 : 1;
+    const k = DESKTOP_SPEED * inv * frameDt;
+    // rig faces -Z at yaw 0
+    playerRig.position.x += (-Math.sin(yaw) * fw + Math.cos(yaw) * rt) * k;
+    playerRig.position.z += (-Math.cos(yaw) * fw - Math.sin(yaw) * rt) * k;
+    clampRigByHead();
   }
 
   // =====================================================================
   // per-frame update
   // =====================================================================
   function update(dt, elapsed, rawDt) {
-    realT += (typeof rawDt === 'number' && rawDt >= 0) ? rawDt : (dt || 0);
+    frameDt = (typeof rawDt === 'number' && rawDt >= 0) ? rawDt : (dt || 0);
+    realT += frameDt;
 
     if (ctx.isXR) {
       if (charging) { // XR session started mid-charge: abandon it
@@ -606,8 +791,10 @@ export function createInteraction(ctx) {
       updateHandXR(hands[0]);
       updateHandXR(hands[1]);
     } else {
+      if (teleAiming) { teleAiming = false; hideTeleportVisuals(); }
       if (hands[0].hint) hands[0].hint.visible = false;
       if (hands[1].hint) hands[1].hint.visible = false;
+      if (desktopMode) desktopMove();
       if (charging && barFill) {
         const pct = Math.round(
           100 * Math.min(1, (realT - chargeStart) / CHARGE_TIME));

@@ -4,7 +4,7 @@
 // and a detailed cozy player rooftop. Registers all colliders with physics.
 //
 // Contract (ARCHITECTURE.md):
-//   createWorld(ctx) -> { update(dt, t), rackAnchors, scoreboardAnchor, facingBuilding }
+//   createWorld(ctx) -> { update(dt, t), rackAnchors, facingBuilding }
 //   facingBuilding.origin is the WORLD-SPACE CENTER of pane (col 0, row 0)
 //   (bottom-left); pane(i,j) center = origin + right*i*(w+gapX) + up*j*(h+gapY).
 
@@ -331,20 +331,20 @@ export function createWorld(ctx) {
   pushBox(S, BHW * 2 - 0.1, 0.14, BHD * 2 - 0.1, 0x9aa09b, 0, ROOF - 0.07, 0); // deck
   addAABB(-BHW, 0, -BHD, BHW, ROOF, BHD, 'roof', 'player-building');
 
-  // parapet (0.9 m) with lower 0.45 m notch at the throwing edge (x -2.5..2.5)
-  const P_IN = 0.4, CAP = 0xe9ddc1, WALL = 0xcdb99b;
+  // Parapet: 0.9 m walls on the sides/back, but the whole throwing edge is a
+  // thin waist-high sill (0.68 m tall, 0.22 m deep). Low + thin enough to
+  // lean right over, and the flat cap doubles as the throwable shelf.
+  const P_IN = 0.4, SILL_D = 0.22, SILL_H = 0.68, CAP = 0xe9ddc1, WALL = 0xcdb99b;
   function parapet(x0, x1, z0, z1, h) {
     const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
     pushBox(S, x1 - x0, h, z1 - z0, WALL, cx, ROOF + h / 2, cz);
     pushBox(S, x1 - x0 + 0.08, 0.09, z1 - z0 + 0.08, CAP, cx, ROOF + h + 0.045, cz);
     addAABB(x0, ROOF - 0.1, z0, x1, ROOF + h + 0.09, z1, 'roof');
   }
-  parapet(-BHW, -2.5, -BHD, -BHD + P_IN, 0.9);          // front left
-  parapet(-2.5, 2.5, -BHD, -BHD + P_IN, 0.45);          // NOTCH (throwing edge)
-  parapet(2.5, BHW, -BHD, -BHD + P_IN, 0.9);            // front right
+  parapet(-BHW, BHW, -BHD, -BHD + SILL_D, SILL_H);      // front SILL (throwing edge)
   parapet(-BHW, BHW, BHD - P_IN, BHD, 0.9);             // back
-  parapet(-BHW, -BHW + P_IN, -BHD + P_IN, BHD - P_IN, 0.9); // left
-  parapet(BHW - P_IN, BHW, -BHD + P_IN, BHD - P_IN, 0.9);   // right
+  parapet(-BHW, -BHW + P_IN, -BHD + SILL_D, BHD - P_IN, 0.9); // left
+  parapet(BHW - P_IN, BHW, -BHD + SILL_D, BHD - P_IN, 0.9);   // right
 
   // AC units (metal — they clang)
   pushBox(S, 1.7, 1.1, 1.3, 0xcdd5d9, 5.6, ROOF + 0.55, 3.4);
@@ -365,32 +365,16 @@ export function createWorld(ctx) {
   pushBox(S, 1.3, 0.5, 1.3, 0xb8a888, -7.6, ROOF + 0.25, 0.5); // roof hatch
   pushBox(S, 1.34, 0.08, 1.34, 0x8d7d5f, -7.6, ROOF + 0.52, 0.5);
 
-  // wooden object rack table (z -4.5..-2.7 — beside the throwing notch so a
-  // VR player spawning at z≈-5 with a small guardian can reach the objects)
-  const TW = 0x9c6b3d, TW2 = 0x7d5430;
-  const RACK_Z = -3.6;
-  pushBox(S, 4.6, 0.09, 1.8, TW, 0, ROOF + 0.875, RACK_Z);        // top (surface ~ +0.92)
-  pushBox(S, 4.4, 0.06, 1.6, TW2, 0, ROOF + 0.42, RACK_Z);        // shelf
-  const legs = [[-2.15, RACK_Z - 0.75], [2.15, RACK_Z - 0.75], [-2.15, RACK_Z + 0.75], [2.15, RACK_Z + 0.75]];
-  for (let i = 0; i < legs.length; i++) {
-    pushBox(S, 0.13, 0.85, 0.13, TW2, legs[i][0], ROOF + 0.425, legs[i][1]);
-  }
-  addAABB(-2.3, ROOF, RACK_Z - 0.9, 2.3, ROOF + 0.92, RACK_Z + 0.9, 'roof', 'rack-table');
-
-  // rack anchors: 2 rows x 7, front row toward spawn, y = ROOF + 0.95
+  // rack anchors: one long line-up on the front sill cap, packed at 0.75 m so
+  // everything is grab-and-toss distance from the edge (sill top ≈ ROOF+0.77)
   const rackAnchors = [];
-  for (let r = 0; r < 2; r++) {
-    for (let i = 0; i < 7; i++) {
-      rackAnchors.push(new THREE.Vector3(-1.95 + i * 0.65, ROOF + 0.95, r === 0 ? RACK_Z - 0.4 : RACK_Z + 0.4));
-    }
+  const SILL_SLOTS = 17;
+  for (let i = 0; i < SILL_SLOTS; i++) {
+    rackAnchors.push(new THREE.Vector3(
+      -((SILL_SLOTS - 1) / 2) * 0.75 + i * 0.75,
+      ROOF + 0.78,
+      -BHD + SILL_D / 2));
   }
-
-  // scoreboard pole (left of throwing edge) + anchor facing spawn
-  pushCyl(S, 0.06, 0.09, 2.7, 7, 0x4a5560, -6.2, ROOF + 1.35, -6.1);
-  const scoreboardAnchor = new THREE.Object3D();
-  scoreboardAnchor.position.set(-6.2, ROOF + 2.85, -6.1);
-  scoreboardAnchor.lookAt(0, ROOF + 1.6, 0); // +Z toward player spawn
-  scene.add(scoreboardAnchor);
 
   // flag pole (front-right corner) — cloth built separately, animated by wind
   const FLAG_X = 8.3, FLAG_Z = -6.2;
@@ -550,5 +534,5 @@ export function createWorld(ctx) {
     flagPos.needsUpdate = true;
   }
 
-  return { update, rackAnchors, scoreboardAnchor, facingBuilding };
+  return { update, rackAnchors, facingBuilding };
 }

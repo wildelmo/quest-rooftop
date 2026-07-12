@@ -88,6 +88,32 @@ const AERO_DEFAULTS = {
     tilt: 0.22,        // visual pendulum tilt
     align: 3.5,
   },
+  // Rubber-band prop glider: a powered climb-out while the band unwinds,
+  // then it settles into the same dreamy glide model as the paper airplane.
+  prop: {
+    thrust: 5.5,       // m/s^2 along the nose while the band unwinds
+    burnTime: 3.2,     // seconds of prop power
+    climb: 1.4,        // vertical speed it eases toward while powered
+    maxSpeed: 9,       // powered-phase speed cap (keeps it toy-like)
+    // glide phase (same knobs as 'glider')
+    minSpeed: 2.0, cruise: 4.0, cruiseRate: 0.5, sink: 1.7,
+    riseRelax: 0.8, glideRelax: 2.2, flareRelax: 3.2,
+    turnRate: 0.7, bankDecay: 0.15, align: 6,
+  },
+  // Toy flying saucer: cancels gravity, weaves side to side at cruise speed
+  // until the charge runs out, then drops ballistically. Bounces don't kill
+  // the power — a saucer that clips a wall and flies on is the joke.
+  ufo: {
+    hoverTime: 7,      // seconds of anti-gravity
+    sink: 0.5,         // gentle descent while powered
+    cruise: 5.0,       // horizontal speed it maintains
+    couple: 0.8,       // 1/s relaxation toward cruise
+    wobbleAmp: 2.0,    // lateral weave accel m/s^2
+    wobbleHz: 2.1,
+    bob: 0.9,          // vertical bob accel amplitude
+    tilt: 0.3,         // visual bank into the weave
+    align: 4,
+  },
 };
 
 export function createPhysics(ctx) {
@@ -479,6 +505,62 @@ export function createPhysics(ctx) {
     }
   }
 
+  function aeroProp(body, a, sdt) {
+    const v = body.velocity, d = body.data;
+    d._t = (d._t || 0) + sdt;
+    if (d._t <= a.burnTime) {
+      // Powered: thrust along the nose, ease into a gentle climb.
+      d.burning = true;
+      _v1.set(0, 0, -1).applyQuaternion(body.mesh.quaternion);
+      v.addScaledVector(_v1, a.thrust * sdt);
+      v.y += (a.climb - v.y) * Math.min(1, 1.1 * sdt);
+      const sp = v.length();
+      if (sp > a.maxSpeed) v.multiplyScalar(a.maxSpeed / sp);
+      if (v.lengthSq() > 0.25) {
+        // lazy S-curve wander while under power
+        const roll = Math.sin(simTime * 1.9 + body._seed) * 0.22;
+        orientAlong(body, v, roll, a.align, sdt);
+      }
+    } else {
+      if (d.burning) d.burning = false; // band unwound: pure glider from here
+      aeroGlider(body, a, sdt);
+    }
+  }
+
+  function aeroUfo(body, a, sdt) {
+    const v = body.velocity, d = body.data;
+    d._t = (d._t || 0) + sdt;
+    if (d._t > a.hoverTime) {
+      if (d.burning) d.burning = false; // charge spent: gravity wins
+      return;
+    }
+    d.burning = true;
+    v.y -= GRAVITY * sdt;                                // cancel gravity
+    v.y += (-a.sink - v.y) * Math.min(1, 2.0 * sdt);     // ease to gentle sink
+    const ph = simTime * a.wobbleHz + body._seed;
+    v.y += Math.sin(ph * 1.7) * a.bob * sdt;             // hover bob
+    const hs = Math.sqrt(v.x * v.x + v.z * v.z);
+    if (hs > 0.05) {
+      // hold cruise speed along the current heading
+      const k = 1 + ((a.cruise - hs) / hs) * Math.min(1, a.couple * sdt);
+      v.x *= k; v.z *= k;
+      // playful lateral weave
+      const inv = 1 / hs;
+      const sx = -v.z * inv, sz = v.x * inv;             // right of travel
+      const acc = Math.sin(ph) * a.wobbleAmp;
+      v.x += sx * acc * sdt;
+      v.z += sz * acc * sdt;
+      // saucer stays level, banking into the weave; spin is objects.js's job
+      _v2.set(sx * a.tilt * Math.sin(ph), 1, sz * a.tilt * Math.sin(ph)).normalize();
+      _v1.set(0, 1, 0);
+      _q1.setFromUnitVectors(_v1, _v2);
+      if (body.mesh) {
+        body.mesh.quaternion.slerp(_q1, Math.min(1, a.align * sdt));
+        body._oriented = true;
+      }
+    }
+  }
+
   function aeroUmbrella(body, a, sdt) {
     const v = body.velocity, d = body.data;
     d._t = (d._t || 0) + sdt;
@@ -559,9 +641,9 @@ export function createPhysics(ctx) {
       const aero = body.aero;
 
       for (let s = 0; s < steps && body.alive && body._water < 0; s++) {
-        // Gravity — except a glider at flying speed, whose aero model owns
-        // the vertical axis (that's what makes the glide dreamy and long).
-        const gliding = aero && aero.type === 'glider' &&
+        // Gravity — except a glider (or prop glider) at flying speed, whose
+        // aero model owns the vertical axis (that's what makes glides dreamy).
+        const gliding = aero && (aero.type === 'glider' || aero.type === 'prop') &&
           v.lengthSq() > (aero.minSpeed || 2.2) * (aero.minSpeed || 2.2);
         if (!gliding) v.y += GRAVITY * sdt;
 
@@ -580,6 +662,8 @@ export function createPhysics(ctx) {
               case 'balloon': aeroBalloon(body, aero, sdt); break;
               case 'rocket': aeroRocket(body, aero, sdt); break;
               case 'umbrella': aeroUmbrella(body, aero, sdt); break;
+              case 'prop': aeroProp(body, aero, sdt); break;
+              case 'ufo': aeroUfo(body, aero, sdt); break;
             }
           } catch (e) { /* bad tuning data must not kill the sim */ }
         }
@@ -613,10 +697,11 @@ export function createPhysics(ctx) {
       if (!body._oriented) integrateAngular(body, dt);
       let wDamp = 0.12;
       if (aero) {
-        if (aero.type === 'glider' || aero.type === 'umbrella') wDamp = 2.5;
+        if (aero.type === 'glider' || aero.type === 'umbrella' || aero.type === 'prop') wDamp = 2.5;
         else if (aero.type === 'rocket' && body.data.burning) wDamp = 3;
         else if (aero.type === 'balloon') wDamp = 0.8;
         else if (aero.type === 'frisbee') wDamp = 0.35;
+        else if (aero.type === 'ufo') wDamp = 2.0;
       }
       body.angularVelocity.multiplyScalar(Math.max(0, 1 - wDamp * dt));
 
