@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <title>CHUCK CITY — Rooftop Physics Playground</title>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #0e1420; }
+    canvas { display: block; }
+    #overlay {
+      position: fixed; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 18px; z-index: 10;
+      background: radial-gradient(ellipse at 50% 30%, #1c2b4a 0%, #0e1420 70%);
+      color: #eef3ff; font-family: 'Segoe UI', system-ui, sans-serif;
+      text-align: center; transition: opacity .5s; padding: 24px;
+    }
+    #overlay.hidden { opacity: 0; pointer-events: none; }
+    #overlay h1 {
+      font-size: clamp(42px, 9vw, 92px); margin: 0; letter-spacing: .04em;
+      background: linear-gradient(180deg, #ffd76a, #ff8a3d);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+      text-shadow: 0 8px 40px rgba(255, 150, 60, .25);
+      font-weight: 900; font-style: italic;
+    }
+    #overlay p.tag { font-size: clamp(15px, 2.4vw, 20px); margin: 0; opacity: .85; max-width: 560px; }
+    #overlay .buttons { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
+    #overlay button {
+      font: 700 20px/1 'Segoe UI', system-ui, sans-serif; letter-spacing: .03em;
+      padding: 16px 34px; border-radius: 14px; border: 0; cursor: pointer;
+      color: #101623; background: linear-gradient(180deg, #ffd76a, #ffb03d);
+      box-shadow: 0 6px 24px rgba(255, 170, 60, .35);
+    }
+    #overlay button.secondary { background: #2b3a58; color: #dfe8ff; box-shadow: none; }
+    #overlay button:disabled { opacity: .4; cursor: default; }
+    #overlay .hint { font-size: 13px; opacity: .6; max-width: 520px; line-height: 1.5; }
+    #err {
+      position: fixed; left: 8px; bottom: 8px; z-index: 20; color: #ff9c9c;
+      font: 12px/1.4 monospace; white-space: pre-wrap; max-width: 90vw; max-height: 30vh;
+      overflow: auto; pointer-events: none;
+    }
+  </style>
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three.module.js" } }
+  </script>
+</head>
+<body>
+  <div id="overlay">
+    <h1>CHUCK CITY</h1>
+    <p class="tag">A sunny rooftop. A rack of ridiculous objects. A city that deserves whatever's coming.</p>
+    <div class="buttons">
+      <button id="btn-vr">Enter VR</button>
+      <button id="btn-desktop" class="secondary">Play on Desktop</button>
+    </div>
+    <p class="hint" id="hint">
+      <b>Quest:</b> grip to grab, swing &amp; release to throw · right stick to snap-turn<br/>
+      <b>Desktop:</b> click to look · 1–9 / scroll picks an object · hold &amp; release left mouse to throw
+    </p>
+  </div>
+  <div id="err"></div>
+  <script>
+    window.addEventListener('error', (e) => {
+      const el = document.getElementById('err');
+      if (el) el.textContent += (e.message || e.error) + '\n';
+    });
+  </script>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>

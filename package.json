@@ -1,0 +1,7 @@
+{
+  "name": "chuck-city",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "CHUCK CITY — rooftop physics playground for Meta Quest (WebXR)"
+}
